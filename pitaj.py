@@ -5,7 +5,7 @@
 """
 import sys
 
-from config import PRISTUPI, naziv_propisa, opis_pristupa
+from config import GLAVNI_PRISTUPI, naziv_propisa, opis_pristupa
 from indeksi import Pretrazivac
 from llm import generisi_odgovor
 
@@ -28,7 +28,7 @@ def odgovori(pitanje, pretrazivaci):
 
 if __name__ == "__main__":
     print("Učitavam modele...")
-    pretrazivaci = [Pretrazivac(naziv) for naziv in PRISTUPI]
+    pretrazivaci = [Pretrazivac(naziv) for naziv in GLAVNI_PRISTUPI]
 
     if len(sys.argv) > 1:
         odgovori(" ".join(sys.argv[1:]), pretrazivaci)

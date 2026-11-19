@@ -1,4 +1,4 @@
-"""Pravi FAISS indekse za sve pristupe koji imaju svoj indeks (A i B).
+"""Pravi FAISS indekse za sve pristupe koji imaju svoj indeks (C i D koriste indeks od B).
 
     python izgradi_indekse.py        svi
     python izgradi_indekse.py B      samo B

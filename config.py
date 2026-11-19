@@ -71,6 +71,17 @@ PRISTUPI["D"] = {
     "prepravka_upita": True,
 }
 
+GLAVNI_PRISTUPI = ["A", "B", "C", "D"]
+
+# Pomoćni pristupi: svaki se od nekog drugog razlikuje u samo jednoj stvari,
+# da bi se videlo šta tačno donosi poboljšanje (A i B se razlikuju u tri stvari odjednom).
+PRISTUPI["E"] = {**PRISTUPI["A"], "fragmentacija": "po_clanovima", "maks_duzina": 1500}  # A sa fragmentima po članovima
+PRISTUPI["G"] = {**PRISTUPI["B"], "indeks": "flat_ip"}                                    # B sa tačnom pretragom umesto HNSW
+PRISTUPI["F"] = {**PRISTUPI["G"], "model": "BAAI/bge-m3",                                 # G sa drugim modelom
+                 "prefiks_upit": "", "prefiks_dokument": ""}
+PRISTUPI["H"] = {**PRISTUPI["F"], "indeks_iz": "F",                                       # F sa rerankingom
+                 "reranker": PRISTUPI["C"]["reranker"], "broj_kandidata": 20}
+
 
 def opis_pristupa(naziv):
     p = PRISTUPI[naziv]
@@ -81,6 +92,8 @@ def opis_pristupa(naziv):
     delovi.append(p["model"].split("/")[-1])
     if p["indeks"] == "flat_l2":
         delovi.append("IndexFlatL2")
+    elif p["indeks"] == "flat_ip":
+        delovi.append("IndexFlatIP (tačna pretraga, kosinusna sličnost)")
     else:
         delovi.append(f"HNSW (M={p['hnsw_m']}, efSearch={p['hnsw_ef_search']})")
     if "reranker" in p:

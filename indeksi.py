@@ -27,11 +27,11 @@ def reranker_model(naziv):
 
 
 def u_vektore(model, tekstovi, podesavanja):
-    # za HNSW sa skalarnim proizvodom vektori moraju biti normalizovani, tada je to kosinusna sličnost
+    # kod skalarnog proizvoda (HNSW, FlatIP) vektori moraju biti normalizovani, tada je to kosinusna sličnost
     return model.encode(
         tekstovi,
-        batch_size=32,
-        normalize_embeddings=podesavanja["indeks"] == "hnsw",
+        batch_size=16,
+        normalize_embeddings=podesavanja["indeks"] != "flat_l2",
         convert_to_numpy=True,
     ).astype(np.float32)
 
@@ -41,6 +41,9 @@ def napravi_faiss_indeks(vektori, podesavanja):
     if podesavanja["indeks"] == "flat_l2":
         # poredi upit sa svakim vektorom, tačno ali sporije na velikim bazama
         indeks = faiss.IndexFlatL2(dimenzija)
+    elif podesavanja["indeks"] == "flat_ip":
+        # isto tačna pretraga, ali po skalarnom proizvodu (kosinusna sličnost)
+        indeks = faiss.IndexFlatIP(dimenzija)
     else:
         # graf u više slojeva, približna ali brza pretraga
         indeks = faiss.IndexHNSWFlat(dimenzija, podesavanja["hnsw_m"], faiss.METRIC_INNER_PRODUCT)

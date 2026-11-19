@@ -28,45 +28,83 @@ pitanje tačno znam gde je odgovor.
 | **C** | kao B | kao B | kao B | reranking: uzima top 20, cross-encoder ih ponovo rangira |
 | **D** | kao B | kao B | kao B | reranking + LLM pre pretrage prepravi pitanje u pravni jezik |
 
-A je osnovni pristup (baseline). B menja sve tri stvari odjednom: fragmentaciju, model i indeks.
-C i D su nadogradnje na B i koriste njegov indeks.
+A je osnovni pristup (baseline). B se od A razlikuje u tri stvari odjednom (fragmentacija, model i
+indeks), pa sam dodao i pomoćne pristupe koji menjaju samo po jednu stvar, da bi se videlo šta zaista
+pravi razliku:
+
+| | Šta je promenjeno |
+|---|---|
+| **E** | A, ali fragment = član (isti MiniLM model i FlatL2) |
+| **G** | B, ali tačna pretraga (IndexFlatIP) umesto HNSW |
+| **F** | G, ali model `bge-m3` (1024 dim) umesto e5-base |
+| **H** | F + reranking |
 
 ## Rezultati
 
 Detaljno, sa svim pronađenim članovima i odgovorima LLM-a: [rezultati.md](rezultati.md).
 
+### Tri glavna pitanja
+
 | Pitanje | Tačan član | A | B | C | D |
 |---|---|---|---|---|---|
 | Koliko potpisa treba izbornoj listi za parlamentarne izbore? | ZINP čl. 71 | – | 4 | – | 5 |
-| Koji je cenzus? | ZINP čl. 128 | 1 | 1 | 1 | 1 |
+| Koji je cenzus? | ZINP čl. 128 | 1 | 2 | 1 | 1 |
 | Ko raspisuje izbore i koliko pre kraja mandata? | Ustav čl. 101 | 5 | 2 | 1 | 1 |
-| **MRR** | | 0.40 | 0.58 | 0.67 | **0.73** |
-| Vreme pretrage | | **14 ms** | 32 ms | ~1,2 s | ~2,1 s |
+| **MRR** | | 0.40 | 0.42 | 0.67 | **0.73** |
+| Vreme pretrage | | **14 ms** | 31 ms | ~1,2 s | ~1,8 s |
 
 (broj = mesto tačnog člana među 5 pronađenih, – = nije pronađen; ZINP = Zakon o izboru narodnih poslanika)
 
+### Provera na 14 pitanja (3 glavna + 11 dodatnih)
+
+Tri pitanja su premalo, a parametre za C i D sam birao gledajući baš ta tri pitanja. Zato su svi
+pristupi provereni i na 11 dodatnih pitanja, kraćih i kolokvijalnijih.
+
+| Pristup | Hit@5 | MRR |
+|---|---|---|
+| A – fiksno + MiniLM + FlatL2 | 7/14 | 0.35 |
+| B – članovi + e5-base + HNSW | 10/14 | 0.47 |
+| C – B + reranking | 11/14 | 0.58 |
+| D – C + prepravka upita | 12/14 | 0.56 |
+| E – članovi + MiniLM + FlatL2 | 5/14 | 0.25 |
+| G – članovi + e5-base + tačna pretraga | 10/14 | 0.47 |
+| **F – članovi + bge-m3 + tačna pretraga** | 11/14 | **0.61** |
+| H – F + reranking | **12/14** | 0.60 |
+
 ## Zaključak
 
-- **Fragmentacija po članovima je bolja od fiksne dužine.** Fiksni fragment često preseče član na pola
-  ili spoji kraj jednog i početak drugog, pa se značenje razvodni. Kod A je tačan član za pitanje 3 tek
-  na 5. mestu, a kod B na 2.
-- **Bolji embedding model pravi razliku na srpskom.** e5-base je sporiji (32 ms naspram 14 ms po upitu),
-  ali bolje razume pitanja postavljena drugim rečima nego u zakonu.
-- **Reranking pomera tačan član na vrh** kada je već među kandidatima (pitanje 3: sa 2. na 1. mesto).
-  Cena je oko 1,2 s po upitu, jer cross-encoder čita pitanje zajedno sa svakim od 20 kandidata.
-  Probao sam i veći reranker `bge-reranker-v2-m3`: bio je oko 10 puta sporiji i nije bio bolji.
-- **Prepravka upita najviše pomaže kod kratkih i kolokvijalnih pitanja**, npr. „ko bira premijera“ ili
-  „može li predsednik da raspusti parlament“. U zakonima piše „predsednik Vlade“ i „Narodna skupština“,
-  pa bez prepravke pretraga promaši. Prva verzija instrukcije je pravila greške („cenzus“ je shvatila
-  kao popis stanovništva i izmišljala članove), pa je instrukcija pooštrena: samo kontekst izbora i
-  bez dodavanja činjenica.
-- **Pitanje 1 je najteže.** Zakon o lokalnim izborima ima skoro isti član o broju potpisa, pa ga svi
-  pristupi stavljaju na prvo mesto. Kada tačan član nije među fragmentima, LLM uglavnom pošteno kaže da
-  odgovor ne može da pronađe, umesto da izmisli broj. To je i glavna prednost RAG-a.
-- **Brzina:** sama pretraga indeksa traje ispod 1 ms za oba indeksa, jer je baza mala (oko 1.300–1.800
-  vektora). Vreme odlazi na pretvaranje pitanja u vektor, reranking i pozive LLM-u.
+- **Embedding model je najvažniji izbor, posebno za srpski.** Kada se menja samo model, MRR raste sa
+  0.25 (MiniLM) na 0.47 (multilingual-e5-base) i na 0.61 (bge-m3). `bge-m3` je najbolji pojedinačni
+  pristup bez ikakvih dodataka. Višejezični je (više od 100 jezika), ima veće vektore
+  (1024) i čita do 8192 tokena, pa ceo član staje u jedan vektor. Cena je sporije pravljenje indeksa
+  (6 min naspram 1,5 min za e5-base na procesoru).
+- **Fragmentacija po članovima nije bolja sama po sebi, zavisi od modela.** Sa MiniLM-om je čak lošija
+  (A 0.35 → E 0.25). MiniLM čita najviše 128 tokena, pa od dugačkog člana vidi samo početak, dok fiksni
+  fragmenti od 600 karaktera uglavnom staju. Sa modelima koji čitaju 512+ tokena članovi su prirodna
+  celina i daju čitljiv izvor (zakon + član) koji LLM može da citira.
+- **HNSW i tačna pretraga daju iste rezultate** (100% istih fragmenata) i obe traju oko 0,2 ms. Na ~1.300
+  vektora HNSW nema prednost, isplati se tek kod stotina hiljada vektora, gde je tačna pretraga spora.
+- **Reranking pomaže slabijem modelu** (e5-base: 0.47 → 0.58) i podiže tačan član na prvo mesto kad je
+  već među kandidatima (pitanje 3: sa 2. na 1. mesto). Kod bge-m3 ne menja MRR (0.61 → 0.60), ali
+  pronađe jedno pitanje više. Cena je oko 1,2 s po upitu. Probao sam i veći reranker
+  `bge-reranker-v2-m3`: bio je oko 10 puta sporiji i nije bio bolji.
+- **Prepravka upita je mešovita.** Na tri glavna pitanja daje najbolji rezultat (0.73), a na svih 14 je
+  malo ispod C (0.56 naspram 0.58), uz jedan pronađen član više. Najviše pomaže kod kolokvijalnih izraza
+  („premijer“ → „predsednik Vlade“), a ponekad pitanje udalji od teksta zakona. Prva verzija instrukcije
+  je pravila greške („cenzus“ je shvatila kao popis stanovništva i izmišljala članove), pa je pooštrena.
+  Rezultat D se malo menja između pokretanja, jer LLM ne prepravi pitanje uvek isto.
+- **Najteža pitanja su ona sa „blizancem“ u drugom zakonu.** Za pitanje 1 Zakon o lokalnim izborima ima
+  skoro isti član o broju potpisa, pa ga svi pristupi stavljaju na prvo mesto. Izbornu tišinu nijedan
+  pristup ne nalazi, jer je član 6 formulisan kao zabrana objavljivanja procena rezultata, bez reči
+  „tišina“. Kada tačan član nije među fragmentima, LLM uglavnom kaže da odgovor ne može da pronađe,
+  umesto da izmisli broj.
+- **Preporuka:** bge-m3 + reranking (H) za najviše pronađenih odgovora, ili bge-m3 bez rerankinga (F)
+  kada je brzina bitna.
 
-Pretpostavka: kada pitanje ne kaže o kojim izborima se radi, podrazumevaju se izbori za narodne poslanike.
+Ograničenja: 14 pitanja je i dalje malo, pa razlike od ±0.05 MRR nisu pouzdane. Rezultati se malo
+menjaju između pokretanja (sitne numeričke razlike na procesoru mogu da zamene mesta dva fragmenta
+sa skoro istim skorom). Kada pitanje ne kaže o kojim izborima se radi, podrazumevaju se izbori za
+narodne poslanike.
 
 ## Pokretanje
 
@@ -77,7 +115,7 @@ py -3.13 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 copy .env.example .env      # pa u .env upisati svoj Groq ključ
 .venv\Scripts\python.exe preuzmi_zakone.py     # skida propise u data/
-.venv\Scripts\python.exe izgradi_indekse.py    # pravi FAISS indekse (prvi put skida modele, par minuta)
+.venv\Scripts\python.exe izgradi_indekse.py    # pravi FAISS indekse (prvi put skida modele, ~10 min)
 .venv\Scripts\python.exe pitaj.py              # postavljanje sopstvenih pitanja
 .venv\Scripts\python.exe evaluacija.py         # poređenje pristupa -> rezultati.md
 ```
@@ -91,6 +129,6 @@ copy .env.example .env      # pa u .env upisati svoj Groq ključ
 | `fragmentacija.py` | učitava tekst i deli ga na fragmente (fiksno ili po članovima) |
 | `indeksi.py` | pravi FAISS indekse i pretražuje ih (uz reranking i prepravku upita) |
 | `llm.py` | pozivi Groq-u: odgovor na pitanje i prepravka upita |
-| `pitanja.py` | test pitanja sa tačnim članom i ključnom frazom |
+| `pitanja.py` | 3 glavna i 11 dodatnih pitanja, sa tačnim članom i ključnom frazom |
 | `evaluacija.py` | poredi pristupe i piše `rezultati.md` |
 | `pitaj.py` | interaktivno postavljanje pitanja |
